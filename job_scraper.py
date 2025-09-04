@@ -1,18 +1,21 @@
 import os
 import json
-import asyncio
 import requests
 from bs4 import BeautifulSoup
-from telegram import Bot
 from datetime import datetime
 
 # ------------------------ Telegram Setup ------------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-bot = Bot(token=TOKEN)
 
-async def send_telegram_message(message):
-    await bot.send_message(chat_id=CHAT_ID, text=message)
+def send_telegram_sync(message):
+    """Send a message via Telegram synchronously."""
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": message}
+    try:
+        requests.post(url, data=payload, timeout=5)
+    except Exception as e:
+        print("Telegram send failed:", e)
 
 # ------------------------ Job Tracking ------------------------
 SENT_FILE = "sent_jobs.json"
@@ -29,98 +32,131 @@ KEYWORDS = [
     "Autonomous Driving", "Generative AI", "GenAI", "Gen AI", "LLM"
 ]
 
-# ------------------------ Helper Functions ------------------------
 def job_matches_keywords(title, description=""):
     combined_text = f"{title} {description}".lower()
     return any(keyword.lower() in combined_text for keyword in KEYWORDS)
 
-# ------------------------ Scrapers ------------------------
+# ------------------------ Individual Site Scrapers ------------------------
 def scrape_datacareer():
     jobs = []
+    url = "https://www.datacareer.de/jobs/?categories%5B%5D=Artificial+Intelligence"
     try:
-        url = "https://www.datacareer.de/jobs/?categories%5B%5D=Artificial+Intelligence"
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         for job_card in soup.find_all("div", class_="job-listing"):
             title = job_card.find("h2").text.strip()
             company = job_card.find("div", class_="company").text.strip()
             link = job_card.find("a")["href"]
-            description = job_card.get_text(separator=" ").strip()
+            description = job_card.get_text()
             job_id = link
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape DataCareer: {e}"))
+        send_telegram_sync(f"⚠️ Could not scrape DataCareer: {e}")
     return jobs
 
 def scrape_stepstone():
     jobs = []
+    url = "https://www.stepstone.de/jobs/ai"
     try:
-        url = "https://www.stepstone.de/jobs/ai"
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         for job_card in soup.find_all("div", class_="job-listing"):
             title = job_card.find("h2").text.strip()
             company = job_card.find("div", class_="company").text.strip()
             link = job_card.find("a")["href"]
-            description = job_card.get_text(separator=" ").strip()
+            description = job_card.get_text()
             job_id = link
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape StepStone: {e}"))
+        send_telegram_sync(f"⚠️ Could not scrape StepStone: {e}")
     return jobs
 
 def scrape_indeed():
     jobs = []
+    url = "https://www.indeed.de/jobs?q=AI&l=Germany"
     try:
-        url = "https://www.indeed.de/jobs?q=AI&l=Germany"
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         for job_card in soup.find_all("div", class_="job_seen_beacon"):
             title = job_card.find("h2").text.strip()
             company = job_card.find("span", class_="companyName").text.strip()
             link = "https://www.indeed.de" + job_card.find("a")["href"]
-            description = job_card.get_text(separator=" ").strip()
+            description = job_card.get_text()
             job_id = link
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape Indeed: {e}"))
+        send_telegram_sync(f"⚠️ Could not scrape Indeed: {e}")
     return jobs
 
+def scrape_glassdoor():
+    jobs = []
+    url = "https://www.glassdoor.de/Job/germany-ai-jobs-SRCH_IL.0,7_IN96_KO8,10.htm"
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for job_card in soup.find_all("li", class_="jl"):
+            title = job_card.find("a", class_="jobLink").text.strip()
+            company = job_card.find("div", class_="jobEmpolyerName").text.strip()
+            link = "https://www.glassdoor.de" + job_card.find("a", class_="jobLink")["href"]
+            description = job_card.get_text()
+            job_id = link
+            if job_id not in sent_jobs and job_matches_keywords(title, description):
+                jobs.append(f"{title} at {company} | {link}")
+                sent_jobs.add(job_id)
+    except Exception as e:
+        send_telegram_sync(f"⚠️ Could not scrape Glassdoor: {e}")
+    return jobs
+
+def scrape_stackoverflow():
+    jobs = []
+    url = "https://stackoverflow.com/jobs?tl=artificial-intelligence"
+    try:
+        response = requests.get(url, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        for job_card in soup.find_all("div", class_="-job"):
+            title = job_card.find("a", class_="s-link").text.strip()
+            company = job_card.find("h3", class_="fc-black-700").text.strip()
+            link = "https://stackoverflow.com" + job_card.find("a", class_="s-link")["href"]
+            description = job_card.get_text()
+            job_id = link
+            if job_id not in sent_jobs and job_matches_keywords(title, description):
+                jobs.append(f"{title} at {company} | {link}")
+                sent_jobs.add(job_id)
+    except Exception as e:
+        send_telegram_sync(f"⚠️ Could not scrape StackOverflow: {e}")
+    return jobs
+
+# ------------------------ Combine all sites ------------------------
 def scrape_all_sites():
     all_jobs = []
     all_jobs.extend(scrape_datacareer())
     all_jobs.extend(scrape_stepstone())
     all_jobs.extend(scrape_indeed())
-    # Add more scrapers if needed
+    all_jobs.extend(scrape_glassdoor())
+    all_jobs.extend(scrape_stackoverflow())
     return all_jobs
 
-# ------------------------ Main ------------------------
-async def main():
+# ------------------------ Main Function ------------------------
+def main():
     now = datetime.now()
-    if 8 <= now.hour <= 18:  # Only run between 8 AM - 6 PM
+    if 8 <= now.hour <= 18:  # only run between 8 AM and 6 PM
         new_jobs = scrape_all_sites()
+        message = ""
+        if new_jobs:
+            message += "🧑‍💻 Latest AI/ML Jobs in Germany:\n\n" + "\n".join(new_jobs[:10]) + "\n\n"
+        # Add content of sent_jobs.json
+        message += "📄 Current sent jobs:\n" + "\n".join(list(sent_jobs)[:10])
+        send_telegram_sync(message)
 
         # Save sent jobs
         with open(SENT_FILE, "w") as f:
             json.dump(list(sent_jobs), f)
 
-        # Prepare message
-        if new_jobs:
-            message = "🧑‍💻 New AI/ML Jobs:\n\n" + "\n".join(new_jobs[:10])
-        else:
-            message = "ℹ️ No new AI/ML jobs found at this time."
-
-        # Include all jobs in sent_jobs.json
-        if sent_jobs:
-            message += "\n\n📦 Last 10 jobs in sent_jobs.json:\n" + "\n".join(list(sent_jobs)[-10:])
-
-        await send_telegram_message(message)
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
