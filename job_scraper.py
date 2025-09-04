@@ -1,10 +1,11 @@
-import requests
-from bs4 import BeautifulSoup
-import json
 import os
 import asyncio
+import json
+import requests
+from bs4 import BeautifulSoup
 from telegram import Bot
 from datetime import datetime
+from time import sleep
 
 # ------------------------ Telegram Setup ------------------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -16,152 +17,160 @@ async def send_telegram_message(message):
 
 # ------------------------ Job Tracking ------------------------
 SENT_FILE = "sent_jobs.json"
+
 if os.path.exists(SENT_FILE):
     with open(SENT_FILE, "r") as f:
         sent_jobs = set(json.load(f))
 else:
     sent_jobs = set()
 
-# ------------------------ Profile Keywords ------------------------
+# ------------------------ Keywords ------------------------
 KEYWORDS = [
     "AI", "ML", "Machine Learning", "Computer Vision",
     "Autonomous Driving", "Generative AI", "GenAI", "Gen AI", "LLM"
 ]
-
-# ------------------------ Scraper Error Messages ------------------------
-error_messages = []
 
 # ------------------------ Helper Functions ------------------------
 def job_matches_keywords(title, description=""):
     combined_text = f"{title} {description}".lower()
     return any(keyword.lower() in combined_text for keyword in KEYWORDS)
 
-# ------------------------ Individual Site Scrapers ------------------------
+def safe_request(url, retries=2, timeout=30):
+    """Try a request with retries."""
+    for attempt in range(retries):
+        try:
+            return requests.get(url, timeout=timeout)
+        except requests.exceptions.RequestException:
+            sleep(2)  # small delay before retry
+    return None
+
+# ------------------------ Site Scrapers ------------------------
 def scrape_datacareer():
     jobs = []
-    try:
-        url = "https://www.datacareer.de/jobs/?categories%5B%5D=Artificial+Intelligence"
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for job_card in soup.find_all("div", class_="job-listing"):
-            title = job_card.find("h2").text.strip()
-            company = job_card.find("div", class_="company").text.strip()
-            link = job_card.find("a")["href"]
-            job_id = link
-            description = job_card.get_text()  # Use entire card as description
-            if job_id not in sent_jobs and job_matches_keywords(title, description):
-                jobs.append(f"{title} at {company} | {link}")
-                sent_jobs.add(job_id)
-    except Exception as e:
-        error_messages.append(f"⚠️ Could not scrape DataCareer: {e}")
+    url = "https://www.datacareer.de/jobs/?categories%5B%5D=Artificial+Intelligence"
+    response = safe_request(url)
+    if not response:
+        raise Exception("Could not reach DataCareer")
+    soup = BeautifulSoup(response.text, "html.parser")
+    for job_card in soup.find_all("div", class_="job-listing"):
+        title = job_card.find("h2").text.strip()
+        company = job_card.find("div", class_="company").text.strip()
+        link = job_card.find("a")["href"]
+        job_id = link
+        if job_id not in sent_jobs and job_matches_keywords(title):
+            jobs.append(f"{title} at {company} | {link}")
+            sent_jobs.add(job_id)
     return jobs
 
 def scrape_stepstone():
     jobs = []
-    try:
-        url = "https://www.stepstone.de/jobs/ai"
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for job_card in soup.find_all("div", class_="job-listing"):
-            title = job_card.find("h2").text.strip()
-            company = job_card.find("div", class_="company").text.strip()
-            link = job_card.find("a")["href"]
-            job_id = link
-            description = job_card.get_text()
-            if job_id not in sent_jobs and job_matches_keywords(title, description):
-                jobs.append(f"{title} at {company} | {link}")
-                sent_jobs.add(job_id)
-    except Exception as e:
-        error_messages.append(f"⚠️ Could not scrape StepStone: {e}")
+    url = "https://www.stepstone.de/jobs/ai"
+    response = safe_request(url)
+    if not response:
+        raise Exception("Could not reach StepStone")
+    soup = BeautifulSoup(response.text, "html.parser")
+    for job_card in soup.find_all("div", class_="job-listing"):
+        title = job_card.find("h2").text.strip()
+        company = job_card.find("div", class_="company").text.strip()
+        link = job_card.find("a")["href"]
+        job_id = link
+        if job_id not in sent_jobs and job_matches_keywords(title):
+            jobs.append(f"{title} at {company} | {link}")
+            sent_jobs.add(job_id)
     return jobs
 
 def scrape_indeed():
     jobs = []
-    try:
-        url = "https://www.indeed.de/jobs?q=AI&l=Germany"
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for job_card in soup.find_all("div", class_="job_seen_beacon"):
-            title = job_card.find("h2").text.strip()
-            company = job_card.find("span", class_="companyName").text.strip()
-            link = "https://www.indeed.de" + job_card.find("a")["href"]
-            job_id = link
-            description = job_card.get_text()
-            if job_id not in sent_jobs and job_matches_keywords(title, description):
-                jobs.append(f"{title} at {company} | {link}")
-                sent_jobs.add(job_id)
-    except Exception as e:
-        error_messages.append(f"⚠️ Could not scrape Indeed: {e}")
+    url = "https://www.indeed.de/jobs?q=AI&l=Germany"
+    response = safe_request(url)
+    if not response:
+        raise Exception("Could not reach Indeed")
+    soup = BeautifulSoup(response.text, "html.parser")
+    for job_card in soup.find_all("div", class_="job_seen_beacon"):
+        title = job_card.find("h2").text.strip()
+        company = job_card.find("span", class_="companyName").text.strip()
+        link = "https://www.indeed.de" + job_card.find("a")["href"]
+        job_id = link
+        if job_id not in sent_jobs and job_matches_keywords(title):
+            jobs.append(f"{title} at {company} | {link}")
+            sent_jobs.add(job_id)
     return jobs
 
 def scrape_glassdoor():
     jobs = []
-    try:
-        url = "https://www.glassdoor.de/Job/germany-ai-jobs-SRCH_IL.0,7_IN96_KO8,10.htm"
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for job_card in soup.find_all("li", class_="jl"):
-            title = job_card.find("a", class_="jobLink").text.strip()
-            company = job_card.find("div", class_="jobEmpolyerName").text.strip()
-            link = "https://www.glassdoor.de" + job_card.find("a", class_="jobLink")["href"]
-            job_id = link
-            description = job_card.get_text()
-            if job_id not in sent_jobs and job_matches_keywords(title, description):
-                jobs.append(f"{title} at {company} | {link}")
-                sent_jobs.add(job_id)
-    except Exception as e:
-        error_messages.append(f"⚠️ Could not scrape Glassdoor: {e}")
+    url = "https://www.glassdoor.de/Job/germany-ai-jobs-SRCH_IL.0,7_IN96_KO8,10.htm"
+    response = safe_request(url)
+    if not response:
+        raise Exception("Could not reach Glassdoor")
+    soup = BeautifulSoup(response.text, "html.parser")
+    for job_card in soup.find_all("li", class_="jl"):
+        title = job_card.find("a", class_="jobLink").text.strip()
+        company_tag = job_card.find("div", class_="jobEmpolyerName")
+        company = company_tag.text.strip() if company_tag else ""
+        link = "https://www.glassdoor.de" + job_card.find("a", class_="jobLink")["href"]
+        job_id = link
+        if job_id not in sent_jobs and job_matches_keywords(title):
+            jobs.append(f"{title} at {company} | {link}")
+            sent_jobs.add(job_id)
     return jobs
 
 def scrape_stackoverflow():
     jobs = []
-    try:
-        url = "https://stackoverflow.com/jobs?tl=artificial-intelligence"
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, "html.parser")
-        for job_card in soup.find_all("div", class_="-job"):
-            title = job_card.find("a", class_="s-link").text.strip()
-            company = job_card.find("h3", class_="fc-black-700").text.strip()
-            link = "https://stackoverflow.com" + job_card.find("a", class_="s-link")["href"]
-            job_id = link
-            description = job_card.get_text()
-            if job_id not in sent_jobs and job_matches_keywords(title, description):
-                jobs.append(f"{title} at {company} | {link}")
-                sent_jobs.add(job_id)
-    except Exception as e:
-        error_messages.append(f"⚠️ Could not scrape StackOverflow: {e}")
+    url = "https://stackoverflow.com/jobs?tl=artificial-intelligence"
+    response = safe_request(url)
+    if not response:
+        raise Exception("Could not reach StackOverflow")
+    soup = BeautifulSoup(response.text, "html.parser")
+    for job_card in soup.find_all("div", class_="-job"):
+        title_tag = job_card.find("a", class_="s-link")
+        if not title_tag:
+            continue
+        title = title_tag.text.strip()
+        company_tag = job_card.find("h3", class_="fc-black-700")
+        company = company_tag.text.strip() if company_tag else ""
+        link = "https://stackoverflow.com" + title_tag["href"]
+        job_id = link
+        if job_id not in sent_jobs and job_matches_keywords(title):
+            jobs.append(f"{title} at {company} | {link}")
+            sent_jobs.add(job_id)
     return jobs
 
-# ------------------------ Combine All Sites ------------------------
+# ------------------------ Combine Sites ------------------------
 def scrape_all_sites():
     all_jobs = []
-    all_jobs.extend(scrape_datacareer())
-    all_jobs.extend(scrape_stepstone())
-    all_jobs.extend(scrape_indeed())
-    all_jobs.extend(scrape_glassdoor())
-    all_jobs.extend(scrape_stackoverflow())
-    return all_jobs
+    errors = []
 
-# ------------------------ Main Function ------------------------
+    for scraper, name in [
+        (scrape_datacareer, "DataCareer"),
+        (scrape_stepstone, "StepStone"),
+        (scrape_indeed, "Indeed"),
+        (scrape_glassdoor, "Glassdoor"),
+        (scrape_stackoverflow, "StackOverflow")
+    ]:
+        try:
+            jobs = scraper()
+            all_jobs.extend(jobs)
+        except Exception as e:
+            errors.append(f"⚠️ Could not scrape {name}: {str(e)}")
+
+    return all_jobs, errors
+
+# ------------------------ Main ------------------------
 async def main():
     now = datetime.now()
-    if 8 <= now.hour <= 18:  # only between 8 AM - 6 PM
-        # Scrape jobs
-        new_jobs = scrape_all_sites()
+    if 8 <= now.hour <= 18:  # Only between 8 AM - 6 PM
+        all_jobs, errors = scrape_all_sites()
 
-        # Send scraping errors first
-        for msg in error_messages:
-            await send_telegram_message(msg)
+        # Compose final message
+        messages = []
+        if errors:
+            messages.extend(errors)
+        if all_jobs:
+            messages.append("🧑‍💻 Latest AI/ML Jobs in Germany:\n" + "\n".join(all_jobs[:20]))
+        messages.append(f"💾 Current sent jobs: {len(sent_jobs)}")
 
-        # Send latest jobs
-        if new_jobs:
-            message = "🧑‍💻 Latest AI/ML Jobs in Germany:\n\n" + "\n".join(new_jobs[:20])
-            await send_telegram_message(message)
-
-        # Send current sent jobs
-        if sent_jobs:
-            current_jobs_message = "💾 Current sent jobs:\n" + "\n".join(list(sent_jobs)[:20])
-            await send_telegram_message(current_jobs_message)
+        # Send message
+        await send_telegram_message("\n\n".join(messages))
 
         # Save sent jobs
         with open(SENT_FILE, "w") as f:
