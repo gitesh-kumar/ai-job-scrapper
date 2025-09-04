@@ -7,16 +7,15 @@ from telegram import Bot
 from datetime import datetime
 
 # ------------------------ Telegram Setup ------------------------
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-bot = Bot(token=TOKEN)
+bot = Bot(token=TELEGRAM_TOKEN)
 
 async def send_telegram_message(message):
     await bot.send_message(chat_id=CHAT_ID, text=message)
 
 # ------------------------ Job Tracking ------------------------
 SENT_FILE = "sent_jobs.json"
-
 if os.path.exists(SENT_FILE):
     with open(SENT_FILE, "r") as f:
         sent_jobs = set(json.load(f))
@@ -29,6 +28,10 @@ KEYWORDS = [
     "Autonomous Driving", "Generative AI", "GenAI", "Gen AI", "LLM"
 ]
 
+# ------------------------ Scraper Error Messages ------------------------
+error_messages = []
+
+# ------------------------ Helper Functions ------------------------
 def job_matches_keywords(title, description=""):
     combined_text = f"{title} {description}".lower()
     return any(keyword.lower() in combined_text for keyword in KEYWORDS)
@@ -44,13 +47,13 @@ def scrape_datacareer():
             title = job_card.find("h2").text.strip()
             company = job_card.find("div", class_="company").text.strip()
             link = job_card.find("a")["href"]
-            description = job_card.find("div", class_="job-type").text.strip() if job_card.find("div", class_="job-type") else ""
             job_id = link
+            description = job_card.get_text()  # Use entire card as description
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape DataCareer: {e}"))
+        error_messages.append(f"⚠️ Could not scrape DataCareer: {e}")
     return jobs
 
 def scrape_stepstone():
@@ -63,13 +66,13 @@ def scrape_stepstone():
             title = job_card.find("h2").text.strip()
             company = job_card.find("div", class_="company").text.strip()
             link = job_card.find("a")["href"]
-            description = job_card.find("div", class_="job-type").text.strip() if job_card.find("div", class_="job-type") else ""
             job_id = link
+            description = job_card.get_text()
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape StepStone: {e}"))
+        error_messages.append(f"⚠️ Could not scrape StepStone: {e}")
     return jobs
 
 def scrape_indeed():
@@ -82,13 +85,13 @@ def scrape_indeed():
             title = job_card.find("h2").text.strip()
             company = job_card.find("span", class_="companyName").text.strip()
             link = "https://www.indeed.de" + job_card.find("a")["href"]
-            description = job_card.find("div", class_="job-snippet").text.strip() if job_card.find("div", class_="job-snippet") else ""
             job_id = link
+            description = job_card.get_text()
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape Indeed: {e}"))
+        error_messages.append(f"⚠️ Could not scrape Indeed: {e}")
     return jobs
 
 def scrape_glassdoor():
@@ -101,13 +104,13 @@ def scrape_glassdoor():
             title = job_card.find("a", class_="jobLink").text.strip()
             company = job_card.find("div", class_="jobEmpolyerName").text.strip()
             link = "https://www.glassdoor.de" + job_card.find("a", class_="jobLink")["href"]
-            description = job_card.find("div", class_="jobLabels").text.strip() if job_card.find("div", class_="jobLabels") else ""
             job_id = link
+            description = job_card.get_text()
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape Glassdoor: {e}"))
+        error_messages.append(f"⚠️ Could not scrape Glassdoor: {e}")
     return jobs
 
 def scrape_stackoverflow():
@@ -120,16 +123,16 @@ def scrape_stackoverflow():
             title = job_card.find("a", class_="s-link").text.strip()
             company = job_card.find("h3", class_="fc-black-700").text.strip()
             link = "https://stackoverflow.com" + job_card.find("a", class_="s-link")["href"]
-            description = job_card.find("span", class_="fc-black-500").text.strip() if job_card.find("span", class_="fc-black-500") else ""
             job_id = link
+            description = job_card.get_text()
             if job_id not in sent_jobs and job_matches_keywords(title, description):
                 jobs.append(f"{title} at {company} | {link}")
                 sent_jobs.add(job_id)
     except Exception as e:
-        asyncio.run(send_telegram_message(f"⚠️ Could not scrape StackOverflow: {e}"))
+        error_messages.append(f"⚠️ Could not scrape StackOverflow: {e}")
     return jobs
 
-# ------------------------ Combine all sites ------------------------
+# ------------------------ Combine All Sites ------------------------
 def scrape_all_sites():
     all_jobs = []
     all_jobs.extend(scrape_datacareer())
@@ -143,12 +146,19 @@ def scrape_all_sites():
 async def main():
     now = datetime.now()
     if 8 <= now.hour <= 18:  # only between 8 AM - 6 PM
+        # Scrape jobs
         new_jobs = scrape_all_sites()
+
+        # Send scraping errors first
+        for msg in error_messages:
+            await send_telegram_message(msg)
+
+        # Send latest jobs
         if new_jobs:
             message = "🧑‍💻 Latest AI/ML Jobs in Germany:\n\n" + "\n".join(new_jobs[:20])
             await send_telegram_message(message)
 
-        # Also send current sent jobs
+        # Send current sent jobs
         if sent_jobs:
             current_jobs_message = "💾 Current sent jobs:\n" + "\n".join(list(sent_jobs)[:20])
             await send_telegram_message(current_jobs_message)
@@ -157,6 +167,6 @@ async def main():
         with open(SENT_FILE, "w") as f:
             json.dump(list(sent_jobs), f)
 
-# ------------------------ Run Script ------------------------
+# ------------------------ Run ------------------------
 if __name__ == "__main__":
     asyncio.run(main())
